@@ -1,12 +1,12 @@
 #include <Arduino.h>
 #include <PCA9685.h>
 
-#define F_LEFT  1
-#define F_RIGHT 2
-#define B_LEFT  3
-#define B_RIGHT 4
+#define F_LEFT  0
+#define F_RIGHT 1
+#define B_LEFT  2
+#define B_RIGHT 3
 #define PWM_MIN  150
-#define PWM_MAX  450
+#define PWM_MAX  500 // Original 600
 
 struct leg {
     int coxa;
@@ -17,51 +17,71 @@ struct leg {
 struct leg legs[4];
 PCA9685 pwm(0x40);
 
-int servoWrite(uint8_t channel, int deg) {
-    uint16_t pulselen = map(deg, 0, 180, PWM_MIN, PWM_MAX);
-    if (pwm.isConnected())
-        pwm.setPWM(channel, pulselen);
-    else
-        Serial.println("PWM not available");
-    if (pwm.lastError() == PCA9685_OK) {
-        Serial.print("channel " + String(channel) + ": " + deg);
-        Serial.println(" (" + String(pulselen) + "WPM)");
-    }
-    delay(500);
-    return pwm.lastError();
-
-}
 void setup() {
     Serial.begin(9600);
     Wire.begin();
     pwm.begin();
-    pwm.setFrequency(50);
+    pwm.setFrequency(50); // SG-90
 
     for (int i = 0; i < 4; i++) {
-        legs[i].tibia = 3*i;
+        legs[i].coxa  = 3*i;
         legs[i].femur = 3*i + 1;
-        legs[i].coxa  = 3*i + 2;
+        legs[i].tibia = 3*i + 2;
     }
 }
 
-void stop(int deg=90) {
+int servoWrite(uint8_t channel, int deg) {
+    uint16_t pulselen = map(deg, 0, 180, PWM_MIN, PWM_MAX);
+
+    pwm.setPWM(channel, pulselen);
+    Serial.print("Write channel " + String(channel) + ": ");
+
+    int err = pwm.lastError();
+
+    if (err == PCA9685_OK)
+        Serial.println(String(deg) + " (" + pulselen + "WPM)");
+    else
+        Serial.println("failed. ERR: " + String(err));
+
+    delay(500);
+    return pwm.lastError();
+}
+
+// Sync all servo at the given degree (90 by default)
+void sync(int deg=90) {
     for (int i = 0; i < 4; i++) {
         servoWrite(legs[i].coxa, deg);
+        servoWrite(legs[i].femur, deg);
+        servoWrite(legs[i].tibia, deg);
     }
 }
 
-void sweep(int from, int to) {
-    int direction = 1;
-    if (from > to) {
-        direction = -1;
+void sweep(int servo, int from, int to, int step=10) {
+    if (from + step > 180 || step <= 0) {
+        Serial.println("Invalid speed");
+        return;
     }
-    for (int deg = from; deg != to; deg+=10*(direction)) {
-        for (int i = 0; i < 4; i++) {
-            servoWrite(legs[i].coxa, deg);
+    int direction = (from > to ? -1 : 1);
+    for (int deg = from; deg != to; deg += step*direction) {
+        servoWrite(servo, deg);    
+    }
+}
+
+void stop() {
+    for (int i = 0; i < 4; i++) {
+        servoWrite(legs[i].coxa, 90);
+        if (i == F_LEFT || i == B_RIGHT) {
+            servoWrite(legs[i].femur, 40);
+            servoWrite(legs[i].tibia, 180);
+        }
+        else { // F_RIGHT || B_LEFT
+            servoWrite(legs[i].femur, 140);
+            servoWrite(legs[i].tibia,0 );
         }
     }
 }
 
 void loop() {
+    //pwm.allOFF();
     stop();
 }
